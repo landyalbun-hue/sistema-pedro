@@ -1,28 +1,44 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Menu, X, Zap, BookOpen, Flame, CheckCircle, TrendingUp, User, Plus } from 'lucide-react';
 
 export default function App() {
   const [isOpen, setIsOpen] = useState(false);
   const [abaAtiva, setAbaAtiva] = useState('painel');
   
-  const [stats, setStats] = useState({
-    nivel: 1,
-    xp: 45,
-    xpMax: 100,
-    hp: 95,
-    energia: 90,
-    inteligencia: 12,
-    cardio: 15,
+  // Carrega os dados salvos no navegador ou usa os valores iniciais
+  const [stats, setStats] = useState(() => {
+    const salvo = localStorage.getItem('sistema_pedro_stats');
+    return salvo ? JSON.parse(salvo) : {
+      nivel: 1,
+      xp: 0,
+      xpMax: 100,
+      hp: 95,
+      energia: 90,
+      inteligencia: 12,
+      cardio: 15,
+    };
   });
 
-  const [tarefas, setTarefas] = useState([
-    { id: 1, titulo: 'Ler 10 páginas de um livro', tipo: 'inteligencia', xp: 20, concluida: false },
-    { id: 2, titulo: 'Correr 3 km', tipo: 'cardio', xp: 30, concluida: false },
-    { id: 3, titulo: 'Beber 2 litros de água', tipo: 'saude', xp: 15, concluida: false },
-  ]);
+  const [tarefas, setTarefas] = useState(() => {
+    const salvo = localStorage.getItem('sistema_pedro_tarefas');
+    return salvo ? JSON.parse(salvo) : [
+      { id: 1, titulo: 'Ler 10 páginas de um livro', tipo: 'inteligencia', xp: 20, concluida: false },
+      { id: 2, titulo: 'Correr 3 km', tipo: 'cardio', xp: 30, concluida: false },
+      { id: 3, titulo: 'Beber 2 litros de água', tipo: 'saude', xp: 15, concluida: false },
+    ];
+  });
 
   const [novaTarefa, setNovaTarefa] = useState('');
   const [novoTipo, setNovoTipo] = useState('inteligencia');
+
+  // Salva automaticamente sempre que stats ou tarefas mudarem
+  useEffect(() => {
+    localStorage.setItem('sistema_pedro_stats', JSON.stringify(stats));
+  }, [stats]);
+
+  useEffect(() => {
+    localStorage.setItem('sistema_pedro_tarefas', JSON.stringify(tarefas));
+  }, [tarefas]);
 
   const concluirTarefa = (id) => {
     setTarefas(tarefas.map(t => {
@@ -78,7 +94,7 @@ export default function App() {
         <div className="w-8"></div>
       </header>
 
-      {/* Aba Lateral (3 traços) */}
+      {/* Aba Lateral */}
       {isOpen && (
         <div className="fixed inset-0 z-50 flex">
           <div className="fixed inset-0 bg-black/70" onClick={() => setIsOpen(false)}></div>
