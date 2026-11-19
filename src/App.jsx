@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from './supabaseClient';
 import {
   User,
@@ -17,7 +17,11 @@ import {
   Sparkles,
   Heart,
   Brain,
-  Zap
+  Zap,
+  BarChart3,
+  Calendar,
+  Trophy,
+  Home
 } from 'lucide-react';
 
 const MISSOES_INICIAIS = [
@@ -44,6 +48,29 @@ const MISSOES_INICIAIS = [
   }
 ];
 
+function obterDataHojeISO() {
+  const agora = new Date();
+  const ano = agora.getFullYear();
+  const mes = String(agora.getMonth() + 1).padStart(2, '0');
+  const dia = String(agora.getDate()).padStart(2, '0');
+  return `${ano}-${mes}-${dia}`;
+}
+
+function formatarDataCurta(dataISO) {
+  if (!dataISO) return '';
+  const partes = dataISO.split('-');
+  if (partes.length !== 3) return dataISO;
+  return `${partes[2]}/${partes[1]}`;
+}
+
+const HISTORICO_INICIAL = [
+  { data: '2026-11-15', xpGanho: 35, corpoDelta: 5, menteDelta: 5 },
+  { data: '2026-11-16', xpGanho: 50, corpoDelta: 10, menteDelta: 5 },
+  { data: '2026-11-17', xpGanho: 20, corpoDelta: 0, menteDelta: 5 },
+  { data: '2026-11-18', xpGanho: 65, corpoDelta: 10, menteDelta: 10 },
+  { data: obterDataHojeISO(), xpGanho: 25, corpoDelta: 5, menteDelta: 5 }
+];
+
 const ESTADO_INICIAL = {
   nome: 'PEDRO',
   nivel: 1,
@@ -54,27 +81,47 @@ const ESTADO_INICIAL = {
   inteligencia: 12,
   cardio: 15,
   fotoUrl: '',
-  missoes: MISSOES_INICIAIS
+  missoes: MISSOES_INICIAIS,
+  historicoEvolucao: HISTORICO_INICIAL
 };
 
 export default function App() {
   const [dados, setDados] = useState(ESTADO_INICIAL);
   const [abaAtiva, setAbaAtiva] = useState('inicio');
-  const [menuAberto, setMenuAberto] = useState(false);
+  const [menuLateralAberto, setMenuLateralAberto] = useState(false);
   const [sincronizado, setSincronizado] = useState(false);
   const [carregando, setCarregando] = useState(true);
+
   const [novaMissaoTexto, setNovaMissaoTexto] = useState('');
   const [novaMissaoCategoria, setNovaMissaoCategoria] = useState('mente');
   const [novaMissaoXp, setNovaMissaoXp] = useState(20);
+
+  // Estados para registrar ou filtrar datas no gráfico de evolução
+  const [dataRegistro, setDataRegistro] = useState(obterDataHojeISO());
+  const [xpRegistro, setXpRegistro] = useState(30);
+  const [corpoRegistro, setCorpoRegistro] = useState(5);
+  const [menteRegistro, setMenteRegistro] = useState(5);
+  const [dataInicioFiltro, setDataInicioFiltro] = useState('');
+  const [dataFimFiltro, setDataFimFiltro] = useState('');
+  const [metricaGrafico, setMetricaGrafico] = useState('xpGanho');
+
   const inputFotoRef = useRef(null);
 
-  // 1. Carrega dados do Supabase (ou localStorage como backup)
   useEffect(() => {
     async function carregarDados() {
       try {
-        const localSalvo = localStorage.getItem('sistema_pedro_v2');
+        const localSalvo = localStorage.getItem('sistema_pedro_v3');
         if (localSalvo) {
-          setDados((prev) => ({ ...prev, ...JSON.parse(localSalvo) }));
+          const parsed = JSON.parse(localSalvo);
+          setDados((prev) => ({
+            ...prev,
+            ...parsed,
+            historicoEvolucao:
+              Array.isArray(parsed.historicoEvolucao) &&
+              parsed.historicoEvolucao.length > 0
+                ? parsed.historicoEvolucao
+                : prev.historicoEvolucao
+          }));
         }
 
         const { data, error } = await supabase
@@ -84,8 +131,17 @@ export default function App() {
           .maybeSingle();
 
         if (!error && data && data.dados) {
-          setDados((prev) => ({ ...prev, ...data.dados }));
-          localStorage.setItem('sistema_pedro_v2', JSON.stringify(data.dados));
+          const remoto = {
+            ...ESTADO_INICIAL,
+            ...data.dados,
+            historicoEvolucao:
+              Array.isArray(data.dados.historicoEvolucao) &&
+              data.dados.historicoEvolucao.length > 0
+                ? data.dados.historicoEvolucao
+                : ESTADO_INICIAL.historicoEvolucao
+          };
+          setDados(remoto);
+          localStorage.setItem('sistema_pedro_v3', JSON.stringify(remoto));
           setSincronizado(true);
         } else if (!error) {
           setSincronizado(true);
@@ -101,10 +157,9 @@ export default function App() {
     carregarDados();
   }, []);
 
-  // 2. Salva alterações no localStorage e sincroniza com o Supabase
   const salvarAlteracoes = async (novosDados) => {
     setDados(novosDados);
-    localStorage.setItem('sistema_pedro_v2', JSON.stringify(novosDados));
+    localStorage.setItem('sistema_pedro_v3', JSON.stringify(novosDados));
 
     try {
       const { error } = await supabase
@@ -122,7 +177,44 @@ export default function App() {
     }
   };
 
-  // 3. Upload e compressão da foto de perfil para caber leve no banco
+  const registrarEvolucaoNaData = (
+    historicoAtual,
+    dataISO,
+    deltaXp,
+    deltaCorpo,
+    deltaMente,
+    somarSeExistir = true
+  ) => {
+    const lista = Array.isArray(historicoAtual) ? [...historicoAtual] : [];
+    const idx = lista.findIndex((item) => item.data === dataISO);
+
+    if (idx >= 0) {
+      const atual = lista[idx];
+      lista[idx] = {
+        data: dataISO,
+        xpGanho: Math.max(
+          0,
+          somarSeExistir ? atual.xpGanho + deltaXp : deltaXp
+        ),
+        corpoDelta: somarSeExistir
+          ? atual.corpoDelta + deltaCorpo
+          : deltaCorpo,
+        menteDelta: somarSeExistir
+          ? atual.menteDelta + deltaMente
+          : deltaMente
+      };
+    } else {
+      lista.push({
+        data: dataISO,
+        xpGanho: Math.max(0, deltaXp),
+        corpoDelta: deltaCorpo,
+        menteDelta: deltaMente
+      });
+    }
+
+    return lista.sort((a, b) => a.data.localeCompare(b.data));
+  };
+
   const handleTrocarFoto = (e) => {
     const arquivo = e.target.files?.[0];
     if (!arquivo) return;
@@ -159,7 +251,6 @@ export default function App() {
     leitor.readAsDataURL(arquivo);
   };
 
-  // 4. Concluir / desmarcar missão evoluindo Corpo e Mente separadamente
   const alternarMissao = (id) => {
     const missaoAlvo = dados.missoes.find((m) => m.id === id);
     if (!missaoAlvo) return;
@@ -181,12 +272,11 @@ export default function App() {
     if (novoXp < 0) novoXp = 0;
 
     const ehMente = missaoAlvo.categoria === 'mente';
-    const novaMenteHp = ehMente
-      ? Math.min(100, Math.max(0, dados.menteHp + 5 * fator))
-      : dados.menteHp;
-    const novoCorpoHp = !ehMente
-      ? Math.min(100, Math.max(0, dados.corpoHp + 5 * fator))
-      : dados.corpoHp;
+    const deltaMente = ehMente ? 5 * fator : 0;
+    const deltaCorpo = !ehMente ? 5 * fator : 0;
+
+    const novaMenteHp = Math.min(100, Math.max(0, dados.menteHp + deltaMente));
+    const novoCorpoHp = Math.min(100, Math.max(0, dados.corpoHp + deltaCorpo));
 
     const novaInteligencia = ehMente
       ? Math.max(0, dados.inteligencia + 1 * fator)
@@ -204,6 +294,15 @@ export default function App() {
       m.id === id ? { ...m, concluida: concluindo } : m
     );
 
+    const historicoAtualizado = registrarEvolucaoNaData(
+      dados.historicoEvolucao,
+      obterDataHojeISO(),
+      missaoAlvo.xp * fator,
+      deltaCorpo,
+      deltaMente,
+      true
+    );
+
     salvarAlteracoes({
       ...dados,
       nivel: novoNivel,
@@ -213,11 +312,11 @@ export default function App() {
       energia: novaEnergia,
       inteligencia: novaInteligencia,
       cardio: novoCardio,
-      missoes: missoesAtualizadas
+      missoes: missoesAtualizadas,
+      historicoEvolucao: historicoAtualizado
     });
   };
 
-  // 5. Novo dia: desmarca missões e restaura energia diária
   const iniciarNovoDia = () => {
     const missoesResetadas = dados.missoes.map((m) => ({
       ...m,
@@ -231,7 +330,6 @@ export default function App() {
     });
   };
 
-  // 6. Adicionar missão personalizada
   const adicionarMissao = (e) => {
     e.preventDefault();
     if (!novaMissaoTexto.trim()) return;
@@ -258,6 +356,57 @@ export default function App() {
     });
   };
 
+  const salvarDataEvolucao = (e) => {
+    e.preventDefault();
+    if (!dataRegistro) return;
+
+    const historicoAtualizado = registrarEvolucaoNaData(
+      dados.historicoEvolucao,
+      dataRegistro,
+      Number(xpRegistro) || 0,
+      Number(corpoRegistro) || 0,
+      Number(menteRegistro) || 0,
+      false
+    );
+
+    salvarAlteracoes({
+      ...dados,
+      historicoEvolucao: historicoAtualizado
+    });
+  };
+
+  const removerDataEvolucao = (dataISO) => {
+    const filtrado = (dados.historicoEvolucao || []).filter(
+      (item) => item.data !== dataISO
+    );
+    salvarAlteracoes({
+      ...dados,
+      historicoEvolucao: filtrado
+    });
+  };
+
+  const historicoFiltrado = useMemo(() => {
+    const lista = [...(dados.historicoEvolucao || [])].sort((a, b) =>
+      a.data.localeCompare(b.data)
+    );
+    return lista.filter((item) => {
+      if (dataInicioFiltro && item.data < dataInicioFiltro) return false;
+      if (dataFimFiltro && item.data > dataFimFiltro) return false;
+      return true;
+    });
+  }, [dados.historicoEvolucao, dataInicioFiltro, dataFimFiltro]);
+
+  const melhorDia = useMemo(() => {
+    if (historicoFiltrado.length === 0) return null;
+    return historicoFiltrado.reduce((melhor, atual) => {
+      const scoreAtual =
+        atual.xpGanho + atual.corpoDelta * 3 + atual.menteDelta * 3;
+      const scoreMelhor =
+        melhor.xpGanho + melhor.corpoDelta * 3 + melhor.menteDelta * 3;
+      return scoreAtual > scoreMelhor ? atual : melhor;
+    }, historicoFiltrado[0]);
+  }, [historicoFiltrado]);
+
   const missoesMente = dados.missoes.filter((m) => m.categoria === 'mente');
   const missoesCorpo = dados.missoes.filter((m) => m.categoria === 'corpo');
   const progressoMenteDia =
@@ -277,17 +426,116 @@ export default function App() {
         )
       : 0;
 
+  const maxValorGrafico = useMemo(() => {
+    if (historicoFiltrado.length === 0) return 10;
+    const maior = Math.max(
+      ...historicoFiltrado.map((item) => Math.abs(Number(item[metricaGrafico]) || 0))
+    );
+    return maior > 0 ? maior : 10;
+  }, [historicoFiltrado, metricaGrafico]);
+
+  const navegarPara = (aba) => {
+    setAbaAtiva(aba);
+    setMenuLateralAberto(false);
+  };
+
   return (
     <div className="min-h-screen bg-[#040b16] text-slate-100 font-sans pb-12 selection:bg-cyan-500/30">
-      {/* Barra Superior */}
+      {/* MENU LATERAL DESLIZANTE (SIDEBAR) */}
+      {menuLateralAberto && (
+        <div className="fixed inset-0 z-50 flex">
+          <div
+            onClick={() => setMenuLateralAberto(false)}
+            className="fixed inset-0 bg-black/70 backdrop-blur-xs"
+          />
+          <aside className="relative z-10 w-72 max-w-[82vw] h-full bg-[#071122] border-r border-cyan-500/25 p-5 flex flex-col justify-between shadow-2xl">
+            <div className="space-y-6">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div>
+                  <p className="text-[10px] font-bold tracking-widest text-cyan-400 uppercase">
+                    NAVEGAÇÃO
+                  </p>
+                  <h2 className="text-base font-extrabold text-white tracking-wide">
+                    SISTEMA PEDRO
+                  </h2>
+                </div>
+                <button
+                  onClick={() => setMenuLateralAberto(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                  aria-label="Fechar menu lateral"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <nav className="space-y-2">
+                <button
+                  onClick={() => navegarPara('inicio')}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-semibold transition text-left ${
+                    abaAtiva === 'inicio'
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                      : 'text-slate-300 hover:bg-slate-900'
+                  }`}
+                >
+                  <Home className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <span>Painel & Missões</span>
+                </button>
+
+                <button
+                  onClick={() => navegarPara('status')}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-semibold transition text-left ${
+                    abaAtiva === 'status'
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                      : 'text-slate-300 hover:bg-slate-900'
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Evolução Corpo & Mente</span>
+                </button>
+
+                <button
+                  onClick={() => navegarPara('evolucao')}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-semibold transition text-left ${
+                    abaAtiva === 'evolucao'
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                      : 'text-slate-300 hover:bg-slate-900'
+                  }`}
+                >
+                  <BarChart3 className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Gráfico & Datas</span>
+                </button>
+              </nav>
+            </div>
+
+            <div className="rounded-xl bg-[#040b16] border border-slate-800 p-3 text-xs space-y-1">
+              <p className="text-slate-400">
+                Nível atual:{' '}
+                <span className="text-white font-bold">{dados.nivel}</span>
+              </p>
+              <p className="text-slate-400">
+                Corpo:{' '}
+                <span className="text-emerald-400 font-bold">
+                  {dados.corpoHp}%
+                </span>{' '}
+                • Mente:{' '}
+                <span className="text-cyan-400 font-bold">
+                  {dados.menteHp}%
+                </span>
+              </p>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* BARRA SUPERIOR LIMPA (SEM ABAS HORIZONTAIS) */}
       <header className="sticky top-0 z-30 bg-[#040b16]/90 backdrop-blur-md border-b border-cyan-500/15 px-4 py-3">
         <div className="max-w-lg mx-auto flex items-center justify-between">
           <button
-            onClick={() => setMenuAberto(!menuAberto)}
+            onClick={() => setMenuLateralAberto(true)}
             className="p-2 rounded-lg text-cyan-400 hover:bg-cyan-500/10 transition"
-            aria-label="Abrir menu"
+            aria-label="Abrir menu lateral"
           >
-            {menuAberto ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            <Menu className="w-6 h-6" />
           </button>
 
           <div className="flex items-center gap-2">
@@ -323,38 +571,6 @@ export default function App() {
             )}
           </button>
         </div>
-
-        {/* Menu de Abas */}
-        {menuAberto && (
-          <nav className="max-w-lg mx-auto mt-3 pt-3 border-t border-slate-800 flex gap-2">
-            <button
-              onClick={() => {
-                setAbaAtiva('inicio');
-                setMenuAberto(false);
-              }}
-              className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold tracking-wider uppercase transition ${
-                abaAtiva === 'inicio'
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                  : 'bg-slate-900/60 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Painel & Missões
-            </button>
-            <button
-              onClick={() => {
-                setAbaAtiva('status');
-                setMenuAberto(false);
-              }}
-              className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold tracking-wider uppercase transition ${
-                abaAtiva === 'status'
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                  : 'bg-slate-900/60 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Evolução Corpo & Mente
-            </button>
-          </nav>
-        )}
       </header>
 
       <input
@@ -374,7 +590,6 @@ export default function App() {
 
         {/* CARTÃO PRINCIPAL DO JOGADOR */}
         <section className="rounded-2xl bg-[#081224] border border-cyan-500/25 p-5 shadow-[0_0_30px_rgba(6,182,212,0.08)] space-y-5">
-          {/* Cabeçalho do Jogador */}
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3.5">
               <div
@@ -412,7 +627,6 @@ export default function App() {
 
           {/* BARRAS SEPARADAS DE CORPO, MENTE E ENERGIA */}
           <div className="space-y-3.5">
-            {/* Evolução do Corpo */}
             <div>
               <div className="flex justify-between items-center text-xs mb-1.5">
                 <span className="flex items-center gap-1.5 text-slate-200 font-medium">
@@ -431,7 +645,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Evolução da Mente */}
             <div>
               <div className="flex justify-between items-center text-xs mb-1.5">
                 <span className="flex items-center gap-1.5 text-slate-200 font-medium">
@@ -450,7 +663,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Energia Diária */}
             <div>
               <div className="flex justify-between items-center text-xs mb-1.5">
                 <span className="flex items-center gap-1.5 text-slate-300 font-medium">
@@ -470,7 +682,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Atributos Separados: Inteligência (Mente) vs Cardio (Corpo) */}
+          {/* Atributos Separados */}
           <div className="grid grid-cols-2 gap-3 pt-1">
             <div className="rounded-xl bg-[#050d1b] border border-cyan-500/20 p-3.5 text-center">
               <div className="flex items-center justify-center gap-1.5 text-xs text-slate-300 mb-1">
@@ -496,7 +708,7 @@ export default function App() {
           </div>
         </section>
 
-        {/* ABA 1: MISSÕES DIÁRIAS */}
+        {/* SEÇÃO 1: MISSÕES DIÁRIAS */}
         {abaAtiva === 'inicio' && (
           <section className="space-y-4">
             <div className="flex items-center justify-between">
@@ -575,7 +787,6 @@ export default function App() {
               })}
             </div>
 
-            {/* Formulário para criar nova missão */}
             <form
               onSubmit={adicionarMissao}
               className="rounded-2xl bg-[#081224] border border-slate-800 p-3.5 space-y-3"
@@ -622,23 +833,22 @@ export default function App() {
           </section>
         )}
 
-        {/* ABA 2: DETALHE DA EVOLUÇÃO SEPARADA DE CORPO E MENTE */}
+        {/* SEÇÃO 2: EVOLUÇÃO SEPARADA DE CORPO E MENTE */}
         {abaAtiva === 'status' && (
           <section className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold tracking-widest text-slate-300 uppercase flex items-center gap-1.5">
                 <Sparkles className="w-4 h-4 text-cyan-400" />
-                EVOLUÇÃO DETALHADA
+                EVOLUÇÃO CORPO & MENTE
               </h3>
               <button
-                onClick={() => setAbaAtiva('inicio')}
+                onClick={() => setAbaAtiva('evolucao')}
                 className="text-xs text-cyan-400 hover:underline"
               >
-                Voltar às missões
+                Ver gráfico por data
               </button>
             </div>
 
-            {/* Card Evolução do Corpo */}
             <div className="rounded-2xl bg-[#081224] border border-emerald-500/25 p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-2 font-bold text-emerald-400 text-sm">
@@ -663,7 +873,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Card Evolução da Mente */}
             <div className="rounded-2xl bg-[#081224] border border-cyan-500/25 p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-2 font-bold text-cyan-400 text-sm">
@@ -687,6 +896,262 @@ export default function App() {
                 </span>
               </div>
             </div>
+          </section>
+        )}
+
+        {/* SEÇÃO 3: GRÁFICO DE EVOLUÇÃO + DATAS DE MAIOR EVOLUÇÃO */}
+        {abaAtiva === 'evolucao' && (
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold tracking-widest text-slate-300 uppercase flex items-center gap-1.5">
+                <BarChart3 className="w-4 h-4 text-cyan-400" />
+                GRÁFICO DE EVOLUÇÃO POR DATA
+              </h3>
+              <button
+                onClick={() => setAbaAtiva('inicio')}
+                className="text-xs text-cyan-400 hover:underline"
+              >
+                Voltar às missões
+              </button>
+            </div>
+
+            {/* Destaque da data com maior evolução */}
+            {melhorDia && (
+              <div className="rounded-2xl bg-gradient-to-r from-amber-500/15 via-cyan-500/10 to-emerald-500/15 border border-amber-400/35 p-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center shrink-0">
+                    <Trophy className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-amber-300">
+                      MAIOR EVOLUÇÃO NO PERÍODO
+                    </p>
+                    <p className="text-sm font-extrabold text-white">
+                      {formatarDataCurta(melhorDia.data)} ({melhorDia.data})
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right text-xs">
+                  <p className="font-bold text-cyan-300">+{melhorDia.xpGanho} XP</p>
+                  <p className="text-[11px] text-slate-300">
+                    Corpo +{melhorDia.corpoDelta}% • Mente +{melhorDia.menteDelta}%
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Seletor de métrica e filtro de intervalo de datas */}
+            <div className="rounded-2xl bg-[#081224] border border-slate-800 p-4 space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setMetricaGrafico('xpGanho')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                    metricaGrafico === 'xpGanho'
+                      ? 'bg-cyan-500 text-slate-950'
+                      : 'bg-slate-900 text-slate-300'
+                  }`}
+                >
+                  XP por Data
+                </button>
+                <button
+                  onClick={() => setMetricaGrafico('corpoDelta')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                    metricaGrafico === 'corpoDelta'
+                      ? 'bg-emerald-500 text-slate-950'
+                      : 'bg-slate-900 text-slate-300'
+                  }`}
+                >
+                  Corpo (%)
+                </button>
+                <button
+                  onClick={() => setMetricaGrafico('menteDelta')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                    metricaGrafico === 'menteDelta'
+                      ? 'bg-sky-400 text-slate-950'
+                      : 'bg-slate-900 text-slate-300'
+                  }`}
+                >
+                  Mente (%)
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 text-xs">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider text-slate-400 mb-1">
+                    Data inicial
+                  </label>
+                  <input
+                    type="date"
+                    value={dataInicioFiltro}
+                    onChange={(e) => setDataInicioFiltro(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider text-slate-400 mb-1">
+                    Data final
+                  </label>
+                  <input
+                    type="date"
+                    value={dataFimFiltro}
+                    onChange={(e) => setDataFimFiltro(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+              </div>
+
+              {(dataInicioFiltro || dataFimFiltro) && (
+                <button
+                  onClick={() => {
+                    setDataInicioFiltro('');
+                    setDataFimFiltro('');
+                  }}
+                  className="text-[11px] text-cyan-400 hover:underline"
+                >
+                  Limpar filtro de datas
+                </button>
+              )}
+
+              {/* Gráfico de barras por data */}
+              {historicoFiltrado.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-6">
+                  Nenhum registro encontrado para as datas selecionadas.
+                </p>
+              ) : (
+                <div className="pt-2 space-y-2.5">
+                  {historicoFiltrado.map((item) => {
+                    const valor = Number(item[metricaGrafico]) || 0;
+                    const larguraPercent = Math.min(
+                      100,
+                      Math.max(6, Math.round((Math.abs(valor) / maxValorGrafico) * 100))
+                    );
+                    const ehPico = melhorDia && melhorDia.data === item.data;
+
+                    const corBarra =
+                      metricaGrafico === 'corpoDelta'
+                        ? 'from-emerald-500 to-green-400'
+                        : metricaGrafico === 'menteDelta'
+                        ? 'from-cyan-500 to-sky-400'
+                        : 'from-cyan-400 to-indigo-500';
+
+                    return (
+                      <div
+                        key={item.data}
+                        className={`p-2.5 rounded-xl border ${
+                          ehPico
+                            ? 'bg-amber-500/10 border-amber-400/40'
+                            : 'bg-slate-950/90 border-slate-800/80'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-xs mb-1.5">
+                          <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-cyan-400" />
+                            {formatarDataCurta(item.data)}
+                            {ehPico && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 font-bold">
+                                TOP DIA
+                              </span>
+                            )}
+                          </span>
+                          <span className="font-bold text-cyan-300">
+                            {metricaGrafico === 'xpGanho'
+                              ? `+${valor} XP`
+                              : `+${valor}%`}
+                          </span>
+                        </div>
+
+                        <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full bg-gradient-to-r ${corBarra} rounded-full transition-all duration-300`}
+                            style={{ width: `${larguraPercent}%` }}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1.5">
+                          <span>
+                            XP: +{item.xpGanho} • Corpo: +{item.corpoDelta}% •
+                            Mente: +{item.menteDelta}%
+                          </span>
+                          <button
+                            onClick={() => removerDataEvolucao(item.data)}
+                            className="text-slate-500 hover:text-rose-400 transition"
+                            title="Excluir registro desta data"
+                          >
+                            Excluir
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Formulário para colocar/atualizar evolução em qualquer data */}
+            <form
+              onSubmit={salvarDataEvolucao}
+              className="rounded-2xl bg-[#081224] border border-slate-800 p-4 space-y-3"
+            >
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                Colocar evolução em uma data
+              </p>
+
+              <div className="grid grid-cols-2 gap-2.5 text-xs">
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-1">
+                    Data
+                  </label>
+                  <input
+                    type="date"
+                    value={dataRegistro}
+                    onChange={(e) => setDataRegistro(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-cyan-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-1">
+                    XP do dia
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={xpRegistro}
+                    onChange={(e) => setXpRegistro(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-1">
+                    Evolução Corpo (%)
+                  </label>
+                  <input
+                    type="number"
+                    value={corpoRegistro}
+                    onChange={(e) => setCorpoRegistro(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-1">
+                    Evolução Mente (%)
+                  </label>
+                  <input
+                    type="number"
+                    value={menteRegistro}
+                    onChange={(e) => setMenteRegistro(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-2.5 rounded-xl bg-cyan-500 text-slate-950 font-extrabold text-xs uppercase tracking-wider hover:bg-cyan-400 transition"
+              >
+                Salvar evolução da data
+              </button>
+            </form>
           </section>
         )}
       </main>
