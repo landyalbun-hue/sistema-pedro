@@ -1,11 +1,19 @@
-import React, { useState, useEffect } from 'react';
-import { Menu, X, Zap, BookOpen, Flame, CheckCircle, TrendingUp, User, Plus } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Menu, X, Zap, BookOpen, Flame, CheckCircle, TrendingUp, User, Plus, Camera } from 'lucide-react';
 
 export default function App() {
   const [isOpen, setIsOpen] = useState(false);
   const [abaAtiva, setAbaAtiva] = useState('painel');
-  
-  // Carrega os dados salvos no navegador ou usa os valores iniciais
+  const fileInputRef = useRef(null);
+
+  const [perfil, setPerfil] = useState(() => {
+    const salvo = localStorage.getItem('sistema_pedro_perfil');
+    return salvo ? JSON.parse(salvo) : {
+      nome: 'PEDRO',
+      foto: ''
+    };
+  });
+
   const [stats, setStats] = useState(() => {
     const salvo = localStorage.getItem('sistema_pedro_stats');
     return salvo ? JSON.parse(salvo) : {
@@ -31,7 +39,10 @@ export default function App() {
   const [novaTarefa, setNovaTarefa] = useState('');
   const [novoTipo, setNovoTipo] = useState('inteligencia');
 
-  // Salva automaticamente sempre que stats ou tarefas mudarem
+  useEffect(() => {
+    localStorage.setItem('sistema_pedro_perfil', JSON.stringify(perfil));
+  }, [perfil]);
+
   useEffect(() => {
     localStorage.setItem('sistema_pedro_stats', JSON.stringify(stats));
   }, [stats]);
@@ -39,6 +50,20 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('sistema_pedro_tarefas', JSON.stringify(tarefas));
   }, [tarefas]);
+
+  const handleFotoChange = (e) => {
+    const arquivo = e.target.files?.[0];
+    if (!arquivo) return;
+
+    const leitor = new FileReader();
+    leitor.onloadend = () => {
+      setPerfil((prev) => ({
+        ...prev,
+        foto: leitor.result
+      }));
+    };
+    leitor.readAsDataURL(arquivo);
+  };
 
   const concluirTarefa = (id) => {
     setTarefas(tarefas.map(t => {
@@ -85,13 +110,31 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-10">
+      <input
+        type="file"
+        accept="image/*"
+        ref={fileInputRef}
+        onChange={handleFotoChange}
+        className="hidden"
+      />
+
       {/* Barra Superior */}
       <header className="flex items-center justify-between p-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-40">
         <button onClick={() => setIsOpen(true)} className="p-2 text-cyan-400 hover:bg-slate-800 rounded-lg">
           <Menu size={28} />
         </button>
         <h1 className="text-lg font-bold tracking-wider text-cyan-400">SISTEMA PEDRO</h1>
-        <div className="w-8"></div>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          title="Alterar foto de perfil"
+          className="w-9 h-9 rounded-full overflow-hidden border border-cyan-500/40 bg-slate-800 flex items-center justify-center"
+        >
+          {perfil.foto ? (
+            <img src={perfil.foto} alt="Perfil" className="w-full h-full object-cover" />
+          ) : (
+            <User size={18} className="text-cyan-400" />
+          )}
+        </button>
       </header>
 
       {/* Aba Lateral */}
@@ -100,12 +143,36 @@ export default function App() {
           <div className="fixed inset-0 bg-black/70" onClick={() => setIsOpen(false)}></div>
           <div className="relative w-72 bg-slate-900 border-r border-slate-800 p-5 flex flex-col justify-between z-10 shadow-2xl">
             <div>
-              <div className="flex justify-between items-center mb-8">
+              <div className="flex justify-between items-center mb-6">
                 <h2 className="text-xl font-bold text-cyan-400">Menu</h2>
                 <button onClick={() => setIsOpen(false)} className="text-slate-400 hover:text-white">
                   <X size={24} />
                 </button>
               </div>
+
+              {/* Bloco de Perfil no Menu */}
+              <div className="flex items-center gap-3 p-3 mb-6 bg-slate-950/70 border border-slate-800 rounded-xl">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="relative w-14 h-14 rounded-full overflow-hidden border border-cyan-500/40 bg-slate-800 flex items-center justify-center shrink-0"
+                >
+                  {perfil.foto ? (
+                    <img src={perfil.foto} alt="Foto do jogador" className="w-full h-full object-cover" />
+                  ) : (
+                    <User size={24} className="text-cyan-400" />
+                  )}
+                </button>
+                <div className="min-w-0">
+                  <p className="font-bold text-white truncate">{perfil.nome}</p>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-xs text-cyan-400 hover:underline flex items-center gap-1 mt-1"
+                  >
+                    <Camera size={12} /> Trocar foto
+                  </button>
+                </div>
+              </div>
+
               <nav className="space-y-3">
                 <button 
                   onClick={() => { setAbaAtiva('painel'); setIsOpen(false); }}
@@ -128,7 +195,7 @@ export default function App() {
               </nav>
             </div>
             <div className="text-xs text-slate-500 text-center">
-              Sistema Pedro v1.0
+              Sistema Pedro v1.1
             </div>
           </div>
         </div>
@@ -140,12 +207,28 @@ export default function App() {
           <>
             {/* Card do Personagem */}
             <div className="bg-gradient-to-br from-slate-900 to-slate-900/80 border border-cyan-500/30 rounded-2xl p-5 shadow-lg shadow-cyan-950/50">
-              <div className="flex justify-between items-center mb-4">
-                <div>
-                  <span className="text-xs uppercase tracking-widest text-cyan-400 font-semibold">Jogador</span>
-                  <h2 className="text-2xl font-black text-white">PEDRO (Nível {stats.nivel})</h2>
+              <div className="flex justify-between items-center gap-3 mb-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Clique para escolher uma foto"
+                    className="relative w-16 h-16 rounded-full overflow-hidden border-2 border-cyan-500/40 bg-slate-800 flex items-center justify-center shrink-0 group"
+                  >
+                    {perfil.foto ? (
+                      <img src={perfil.foto} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      <User size={28} className="text-cyan-400" />
+                    )}
+                    <span className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                      <Camera size={16} className="text-white" />
+                    </span>
+                  </button>
+                  <div className="min-w-0">
+                    <span className="text-xs uppercase tracking-widest text-cyan-400 font-semibold">Jogador</span>
+                    <h2 className="text-xl font-black text-white truncate">{perfil.nome} (Nível {stats.nivel})</h2>
+                  </div>
                 </div>
-                <div className="bg-cyan-500/10 border border-cyan-500/30 px-3 py-1 rounded-full text-cyan-400 text-sm font-bold">
+                <div className="bg-cyan-500/10 border border-cyan-500/30 px-3 py-1 rounded-full text-cyan-400 text-sm font-bold shrink-0">
                   XP: {stats.xp}/{stats.xpMax}
                 </div>
               </div>
