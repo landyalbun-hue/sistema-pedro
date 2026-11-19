@@ -1,72 +1,126 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Menu, X, Zap, BookOpen, Flame, CheckCircle, TrendingUp, User, Plus, Camera } from 'lucide-react';
+import { Menu, X, Zap, BookOpen, Flame, CheckCircle, TrendingUp, User, Plus, Camera, Cloud } from 'lucide-react';
+import { supabase } from './supabaseClient';
+
+const TAREFAS_INICIAIS = [
+  { id: 1, titulo: 'Ler 10 páginas de um livro', tipo: 'inteligencia', xp: 20, concluida: false },
+  { id: 2, titulo: 'Correr 3 km', tipo: 'cardio', xp: 30, concluida: false },
+  { id: 3, titulo: 'Beber 2 litros de água', tipo: 'saude', xp: 15, concluida: false },
+];
 
 export default function App() {
   const [isOpen, setIsOpen] = useState(false);
   const [abaAtiva, setAbaAtiva] = useState('painel');
+  const [carregando, setCarregando] = useState(true);
+  const [sincronizando, setSincronizando] = useState(false);
   const fileInputRef = useRef(null);
 
-  const [perfil, setPerfil] = useState(() => {
-    const salvo = localStorage.getItem('sistema_pedro_perfil');
-    return salvo ? JSON.parse(salvo) : {
-      nome: 'PEDRO',
-      foto: ''
-    };
+  const [perfil, setPerfil] = useState({
+    nome: 'PEDRO',
+    foto: ''
   });
 
-  const [stats, setStats] = useState(() => {
-    const salvo = localStorage.getItem('sistema_pedro_stats');
-    return salvo ? JSON.parse(salvo) : {
-      nivel: 1,
-      xp: 0,
-      xpMax: 100,
-      hp: 95,
-      energia: 90,
-      inteligencia: 12,
-      cardio: 15,
-    };
+  const [stats, setStats] = useState({
+    nivel: 1,
+    xp: 0,
+    xpMax: 100,
+    hp: 95,
+    energia: 90,
+    inteligencia: 12,
+    cardio: 15,
   });
 
-  const [tarefas, setTarefas] = useState(() => {
-    const salvo = localStorage.getItem('sistema_pedro_tarefas');
-    return salvo ? JSON.parse(salvo) : [
-      { id: 1, titulo: 'Ler 10 páginas de um livro', tipo: 'inteligencia', xp: 20, concluida: false },
-      { id: 2, titulo: 'Correr 3 km', tipo: 'cardio', xp: 30, concluida: false },
-      { id: 3, titulo: 'Beber 2 litros de água', tipo: 'saude', xp: 15, concluida: false },
-    ];
-  });
-
+  const [tarefas, setTarefas] = useState(TAREFAS_INICIAIS);
   const [novaTarefa, setNovaTarefa] = useState('');
   const [novoTipo, setNovoTipo] = useState('inteligencia');
 
+  // Carregar dados do Supabase ao abrir no PC ou celular
   useEffect(() => {
-    localStorage.setItem('sistema_pedro_perfil', JSON.stringify(perfil));
-  }, [perfil]);
+    const carregarDados = async () => {
+      const { data, error } = await supabase
+        .from('jogador_pedro')
+        .select('*')
+        .eq('id', 'pedro')
+        .single();
 
-  useEffect(() => {
-    localStorage.setItem('sistema_pedro_stats', JSON.stringify(stats));
-  }, [stats]);
+      if (!error && data) {
+        setPerfil({
+          nome: data.nome || 'PEDRO',
+          foto: data.foto || ''
+        });
+        setStats({
+          nivel: data.nivel,
+          xp: data.xp,
+          xpMax: data.xp_max,
+          hp: data.hp,
+          energia: data.energia,
+          inteligencia: data.inteligencia,
+          cardio: data.cardio
+        });
+        setTarefas(Array.isArray(data.tarefas) && data.tarefas.length > 0 ? data.tarefas : TAREFAS_INICIAIS);
+      }
+      setCarregando(false);
+    };
 
-  useEffect(() => {
-    localStorage.setItem('sistema_pedro_tarefas', JSON.stringify(tarefas));
-  }, [tarefas]);
+    carregarDados();
+  }, []);
 
+  // Função central para salvar tudo no Supabase
+  const salvarNoSupabase = async (novoPerfil, novosStats, novasTarefas) => {
+    setSincronizando(true);
+    await supabase
+      .from('jogador_pedro')
+      .upsert({
+        id: 'pedro',
+        nome: novoPerfil.nome,
+        foto: novoPerfil.foto,
+        nivel: novosStats.nivel,
+        xp: novosStats.xp,
+        xp_max: novosStats.xpMax,
+        hp: novosStats.hp,
+        energia: novosStats.energia,
+        inteligencia: novosStats.inteligencia,
+        cardio: novosStats.cardio,
+        tarefas: novasTarefas,
+        updated_at: new Date().toISOString()
+      });
+    setSincronizando(false);
+  };
+
+  // Comprime a imagem para 300x300 antes de salvar no banco
   const handleFotoChange = (e) => {
     const arquivo = e.target.files?.[0];
     if (!arquivo) return;
 
     const leitor = new FileReader();
-    leitor.onloadend = () => {
-      setPerfil((prev) => ({
-        ...prev,
-        foto: leitor.result
-      }));
+    leitor.onload = (evento) => {
+      const img = new Image();
+      img.onload = async () => {
+        const canvas = document.createElement('canvas');
+        const tamanho = 300;
+        canvas.width = tamanho;
+        canvas.height = tamanho;
+        const ctx = canvas.getContext('2d');
+
+        const minLado = Math.min(img.width, img.height);
+        const sx = (img.width - minLado) / 2;
+        const sy = (img.height - minLado) / 2;
+
+        ctx.drawImage(img, sx, sy, minLado, minLado, 0, 0, tamanho, tamanho);
+        const fotoComprimida = canvas.toDataURL('image/jpeg', 0.8);
+
+        const novoPerfil = { ...perfil, foto: fotoComprimida };
+        setPerfil(novoPerfil);
+        await salvarNoSupabase(novoPerfil, stats, tarefas);
+      };
+      img.src = evento.target.result;
     };
     leitor.readAsDataURL(arquivo);
   };
 
-  const concluirTarefa = (id) => {
-    setTarefas(tarefas.map(t => {
+  const concluirTarefa = async (id) => {
+    let novosStats = { ...stats };
+    const novasTarefas = tarefas.map((t) => {
       if (t.id === id && !t.concluida) {
         let novoXp = stats.xp + t.xp;
         let novoNivel = stats.nivel;
@@ -79,22 +133,26 @@ export default function App() {
           novoXp = novoXp - stats.xpMax;
         }
 
-        setStats({
+        novosStats = {
           ...stats,
           nivel: novoNivel,
           xp: novoXp,
           hp: novoHp,
           inteligencia: novaInt,
           cardio: novoCardio
-        });
+        };
 
         return { ...t, concluida: true };
       }
       return t;
-    }));
+    });
+
+    setStats(novosStats);
+    setTarefas(novasTarefas);
+    await salvarNoSupabase(perfil, novosStats, novasTarefas);
   };
 
-  const adicionarTarefa = (e) => {
+  const adicionarTarefa = async (e) => {
     e.preventDefault();
     if (!novaTarefa.trim()) return;
     const item = {
@@ -104,9 +162,25 @@ export default function App() {
       xp: 20,
       concluida: false
     };
-    setTarefas([...tarefas, item]);
+    const novasTarefas = [...tarefas, item];
+    setTarefas(novasTarefas);
     setNovaTarefa('');
+    await salvarNoSupabase(perfil, stats, novasTarefas);
   };
+
+  const resetarDia = async () => {
+    const tarefasResetadas = tarefas.map((t) => ({ ...t, concluida: false }));
+    setTarefas(tarefasResetadas);
+    await salvarNoSupabase(perfil, stats, tarefasResetadas);
+  };
+
+  if (carregando) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-cyan-400 flex items-center justify-center font-bold tracking-wider">
+        CARREGANDO SISTEMA PEDRO...
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-10">
@@ -123,7 +197,10 @@ export default function App() {
         <button onClick={() => setIsOpen(true)} className="p-2 text-cyan-400 hover:bg-slate-800 rounded-lg">
           <Menu size={28} />
         </button>
-        <h1 className="text-lg font-bold tracking-wider text-cyan-400">SISTEMA PEDRO</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-bold tracking-wider text-cyan-400">SISTEMA PEDRO</h1>
+          <Cloud size={15} className={sincronizando ? 'text-amber-400 animate-pulse' : 'text-emerald-400'} />
+        </div>
         <button
           onClick={() => fileInputRef.current?.click()}
           title="Alterar foto de perfil"
@@ -195,7 +272,7 @@ export default function App() {
               </nav>
             </div>
             <div className="text-xs text-slate-500 text-center">
-              Sistema Pedro v1.1
+              Sistema Pedro v2.0 (Cloud Sync)
             </div>
           </div>
         </div>
@@ -275,7 +352,15 @@ export default function App() {
 
             {/* Missões Diárias */}
             <div className="space-y-3">
-              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider px-1">Missões Diárias</h3>
+              <div className="flex items-center justify-between px-1">
+                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Missões Diárias</h3>
+                <button
+                  onClick={resetarDia}
+                  className="text-xs text-cyan-400 hover:underline"
+                >
+                  Novo dia (desmarcar)
+                </button>
+              </div>
               {tarefas.map((tarefa) => (
                 <div 
                   key={tarefa.id}
@@ -341,7 +426,7 @@ export default function App() {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
             <h2 className="text-lg font-bold text-cyan-400">Resumo de Performance</h2>
             <p className="text-sm text-slate-400">
-              Cada tarefa concluída fortalece seus atributos. Continue completando suas metas diárias para subir de nível!
+              Cada tarefa concluída fortalece seus atributos. Tudo fica sincronizado automaticamente na nuvem entre seu PC e celular.
             </p>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between p-3 bg-slate-950 rounded-xl">
